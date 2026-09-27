@@ -349,7 +349,7 @@ const PLANS = {
 };
 
 let currentTab = "A";
-let state = {}; // per-exercise runtime state: {done, expanded, sets:[{reps,kg}], comment}
+let state = {};
 let history = [];
 
 function todayStr(){
@@ -357,9 +357,13 @@ function todayStr(){
   return d.toISOString().slice(0,10);
 }
 
-function resetState(planKey){
+function draftKey(planKey){
+  return 'training-draft-' + planKey;
+}
+
+function freshState(planKey){
   const plan = PLANS[planKey];
-  state = plan.exercises.map(ex => ({
+  return plan.exercises.map(ex => ({
     done:false,
     expanded:false,
     sets: Array.from({length: ex.sets}, () => ({reps:"", kg:"", repsTouched:false, kgTouched:false})),
@@ -367,8 +371,40 @@ function resetState(planKey){
   }));
 }
 
+function resetState(planKey){
+  const plan = PLANS[planKey];
+  let loaded = null;
+  try{
+    const raw = localStorage.getItem(draftKey(planKey));
+    if(raw){
+      const parsed = JSON.parse(raw);
+      if(Array.isArray(parsed) && parsed.length === plan.exercises.length){
+        loaded = parsed;
+      }
+    }
+  }catch(e){
+    loaded = null;
+  }
+  state = loaded || freshState(planKey);
+}
+
+function saveDraft(){
+  try{
+    localStorage.setItem(draftKey(currentTab), JSON.stringify(state));
+  }catch(e){
+    console.error('Falha ao salvar rascunho', e);
+  }
+}
+
+function clearDraft(planKey){
+  try{
+    localStorage.removeItem(draftKey(planKey));
+  }catch(e){}
+}
+
 function switchTab(key){
   currentTab = key;
+  try{ localStorage.setItem('training-current-tab', key); }catch(e){}
   document.getElementById('tabA').className = 'tab' + (key==='A' ? ' active-a' : '');
   document.getElementById('tabB').className = 'tab' + (key==='B' ? ' active-b' : '');
   document.getElementById('app').classList.remove('tab-a','tab-b');
@@ -382,6 +418,7 @@ function switchTab(key){
 function toggleExpand(i){
   state[i].expanded = !state[i].expanded;
   renderExercises();
+  saveDraft();
 }
 
 function toggleDone(i, evt){
@@ -389,6 +426,7 @@ function toggleDone(i, evt){
   state[i].done = !state[i].done;
   renderExercises();
   updateStats();
+  saveDraft();
 }
 
 function updateSet(i, j, field, value){
@@ -406,6 +444,7 @@ function updateSet(i, j, field, value){
       }
     }
   }
+  saveDraft();
 }
 
 function addSet(i, evt){
@@ -418,16 +457,19 @@ function addSet(i, evt){
     kgTouched:false
   });
   renderExercises();
+  saveDraft();
 }
 
 function removeSet(i, j, evt){
   evt.stopPropagation();
   state[i].sets.splice(j,1);
   renderExercises();
+  saveDraft();
 }
 
 function updateComment(i, value){
   state[i].comment = value;
+  saveDraft();
 }
 
 function renderExercises(){
@@ -553,6 +595,10 @@ async function saveSession(){
   };
   history.unshift(entry);
   await saveHistory();
+
+  clearDraft(currentTab);
+  state = freshState(currentTab);
+  renderExercises();
   renderHistory();
   updateStats();
   const msg = document.getElementById('saveMsg');
@@ -560,8 +606,14 @@ async function saveSession(){
   setTimeout(() => { msg.textContent = ""; }, 3000);
 }
 
-document.getElementById('sessionDate').value = todayStr();
-switchTab('A');
+const savedDate = localStorage.getItem('training-session-date');
+document.getElementById('sessionDate').value = savedDate || todayStr();
+document.getElementById('sessionDate').addEventListener('change', function(){
+  try{ localStorage.setItem('training-session-date', this.value); }catch(e){}
+});
+
+const savedTab = localStorage.getItem('training-current-tab');
+switchTab(savedTab === 'B' ? 'B' : 'A');
 loadHistory();
 
 if('serviceWorker' in navigator){
